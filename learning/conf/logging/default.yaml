@@ -1,0 +1,6 @@
+# Logging configuration
+log_dir: "logs"
+log_wandb: true
+log_interval: 10  # Log every N batches
+output_dir: "outputs/${now:%Y-%m-%d}/${wandb.run_name}"
+save_misclassified: true  # Whether to save misclassified samples

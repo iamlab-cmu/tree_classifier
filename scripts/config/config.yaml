@@ -1,0 +1,40 @@
+# Make sure there's no model configuration here
+data:
+  probe_bag_dir: "ProbeBags/"
+  robot_bag_dir: "SplitRoboBags/"
+  # probe_bag_dir: "TestBag"
+  # robot_bag_dir: "TestBag"
+  window_length_seconds: 1.0
+  window_stride_seconds: 0.1
+  random_state: 42
+  max_time_diff: 0.2  
+  non_contact_threshold_factor: 0.1
+  enable_squeezing: true
+  dynamic_threshold_offset: 0.15
+
+segmentation:
+  amplitude_threshold: 0.05 
+  cutoff_freq: 1000  
+  squeeze_duration: 0.5  
+  min_duration: 0.05  
+  window_size_ms: 20  
+  dynamic_threshold_percentile: 90
+
+output:
+  categories:
+    - leaf
+    - twig
+    - trunk
+    - ambient
+  probe_dataset_dir: "audio_visual_dataset"
+  robot_dataset_dir: "audio_visual_dataset_robo"
+
+preprocessing:
+  probe_noise_file: "humming.wav"
+  robot_noise_file: "robo_humming.wav"
+  # Keep the original noise file for backward compatibility
+  noise_file: "humming.wav"
+  # New parameter to toggle denoising on/off
+  enable_denoising: false
+  # New parameter to toggle audio normalization on/off
+  do_norm: true

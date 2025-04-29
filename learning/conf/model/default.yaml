@@ -1,0 +1,33 @@
+# Model configuration
+num_classes: 4
+use_images: true
+use_audio: true
+from_scratch: false
+transformer_dim: 512
+transformer_layers: 2
+transformer_heads: 8
+dropout: 0.1
+
+# Audio model settings
+audio_model: "ast"  # Options: "ast" or "clap"
+use_dual_audio: true  # Set to true to use both AST and CLAP models
+ast_model_name: "MIT/ast-finetuned-audioset-10-10-0.4593"
+ast_hidden_size: 384
+ast_intermediate_size: 1536
+ast_num_hidden_layers: 6
+ast_num_attention_heads: 6
+clap_model_name: "laion/clap-htsat-fused"
+clap_hidden_size: 768
+
+# Fusion settings
+fusion_type: "transformer"  # Options: "transformer" or "mlp"
+fusion_dim: 512
+fusion_layers: 2
+fusion_heads: 8
+
+# Image model settings
+img_model: "resnet18"
+img_dim: 512
+
+# New parameter
+use_mfcc: false  # Whether to use MFCC features as additional input

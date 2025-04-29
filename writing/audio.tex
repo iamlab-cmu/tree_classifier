@@ -1,0 +1,86 @@
+\textbf{Symbol Definitions:}
+\begin{itemize}
+    \item $T_{\text{dynamic}}$: Dynamic threshold
+    \item $F_{\text{noise}}$: Noise floor (10th percentile of the smoothed envelope)
+    \item $F_{\text{signal}}$: Signal peak (90th percentile of the smoothed envelope)
+    \item $\alpha_{\text{offset}}$: Dynamic threshold offset parameter (default: 0.15)
+    \item $T_{\text{non-contact}}$: Threshold for non-contact regions
+    \item $\beta_{\text{factor}}$: Non-contact threshold factor (default: 0.5)
+    \item $C(t)$: Contact classification at time $t$
+    \item $E(t)$: Smoothed envelope value at time $t$
+    \item $\gamma_{\text{squeeze}}$: Squeeze factor in seconds (default: 0.3)
+    \item $\delta_{\min}$: Minimum segment duration in seconds (default: 0.05)
+    \item $S = [t_{\text{start}}, t_{\text{end}}]$: A contact (or candidate) segment
+    \item $S_1 = [t_{\text{start}}^1, t_{\text{end}}^1], \quad S_2 = [t_{\text{start}}^2, t_{\text{end}}^2]$: Segments for merging
+    \item $\omega_{\text{stride}}$: Window stride in seconds (default: 0.1)
+    \item $\omega_{\text{length}}$: Window length in seconds (default: 1.0)
+    \item $W_i$: The $i$-th window within a segment $S$
+\end{itemize}
+
+% ===============================
+% Equations
+% ===============================
+
+% 1. Dynamic Threshold
+\[
+T_{\text{dynamic}}
+= F_{\text{noise}}
++ \bigl(F_{\text{signal}} - F_{\text{noise}}\bigr)\,\alpha_{\text{offset}}
+\]
+
+% 2. Non-Contact Threshold
+\[
+T_{\text{non-contact}}
+= T_{\text{dynamic}} \cdot \beta_{\text{factor}}
+\]
+
+% 3. Contact Classification
+\[
+C(t)
+=
+\begin{cases}
+1 \text{ (contact)} & \text{if } E(t) > T_{\text{dynamic}},\\
+0 \text{ (non-contact)} & \text{if } E(t) \leq T_{\text{dynamic}},
+\end{cases}
+\]
+
+% 4. Segment Identification - Split into two lines
+\begin{align}
+S_{\text{contact}} = \{[t_{\text{start}}^i, t_{\text{end}}^i] \mid \nonumber \\
+C(t) = 1 \forall t \in [t_{\text{start}}^i, t_{\text{end}}^i]\}
+\end{align}
+
+% 5. Segment Merging (Squeezing)
+\[
+S_{\text{merged}} = S_1 \cup S_2 \quad \text{if} \quad t_{\text{start}}^2 - t_{\text{end}}^1 \leq \gamma_{\text{squeeze}}
+\]
+
+% 6. Minimum Segment Duration Filter
+\begin{align}
+S_{\text{valid}} = \{S_i \in S_{\text{contact}} \mid \nonumber \\
+t_{\text{end}}^i - t_{\text{start}}^i \geq \delta_{\min}\}
+\end{align}
+
+% 7. Non-Contact Segment Identification - Split into multiple lines
+\begin{align}
+S_{\text{non-contact}} = \{[t_{\text{start}}^i, t_{\text{end}}^{i}] \mid \nonumber \\
+\forall t \in [t_{\text{start}}^i, t_{\text{end}}^{i}]: E(t) \leq T_{\text{non-contact}}\}
+\end{align}
+
+% 8. Window Creation for a Segment - Split into multiple lines
+\begin{align}
+W(S_i) = \{W_j \mid W_j = [t_{\text{start}}^i + j \cdot \omega_{\text{stride}}, \nonumber \\
+t_{\text{start}}^i + j \cdot \omega_{\text{stride}} + \omega_{\text{length}}], \nonumber \\
+j \in \mathbb{N}_0\}
+\end{align}
+
+% 9. Window Constraint
+\[
+\text{where } j \text{ satisfies: } t_{\text{start}}^i + j \cdot \omega_{\text{stride}} + \omega_{\text{length}} \leq t_{\text{end}}^i
+\]
+
+% 10. Final Segmentation Result - Split into multiple lines
+\begin{align}
+\text{Segments} = \{(t_{\text{start}}^i, t_{\text{end}}^i, \text{is\_contact}_i, W(S_i)) \mid \nonumber \\
+S_i \in S_{\text{valid}} \cup S_{\text{non-contact}}\}
+\end{align}

@@ -1,0 +1,27 @@
+# Main configuration file that imports all other configs
+defaults:
+  - _self_
+  - model: default
+  - data: default
+  - training: default
+  - logging: default
+  - wandb: default
+
+# Global settings
+seed: 42
+checkpoint_dir: null  # Will be set by the code at runtime 
+
+# Audio model selection
+audio_model_type: "ast"  # Options: "ast" or "clap"
+
+# Override settings for pretrained audio-image run
+model:
+  use_images: true
+  use_audio: true
+  from_scratch: false
+  audio_model: "ast"  # Base audio model (doesn't matter much when use_dual_audio is true)
+  use_dual_audio: true  # Use both AST and CLAP together
+  fusion_type: "transformer"
+
+# Binary classification flag (default to false)
+binary_classification: true
