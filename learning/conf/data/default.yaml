@@ -1,0 +1,127 @@
+# Data configuration
+train_csv_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_default/dataset.csv'  # Relative to train_base_path
+test_csv_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_robo_default/dataset.csv'   # Relative to test_base_path
+train_base_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_default'
+test_base_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_robo_default'
+
+# Dataset variations paths (will be overridden by command line arguments)
+dataset_variations:
+  default:
+    train_path: 'dataset_ablation/audio_visual_dataset_default'
+    test_path: 'dataset_ablation/audio_visual_dataset_robo_default'
+    do_norm: true
+  
+  no_norm:
+    train_path: 'dataset_ablation/audio_visual_dataset_no_norm'
+    test_path: 'dataset_ablation/audio_visual_dataset_robo_no_norm'
+    do_norm: false
+  
+  no_denoise:
+    train_path: 'dataset_ablation/audio_visual_dataset_no_denoise'
+    test_path: 'dataset_ablation/audio_visual_dataset_robo_no_denoise'
+    do_norm: true
+  
+  raw:
+    train_path: 'dataset_ablation/audio_visual_dataset_raw'
+    test_path: 'dataset_ablation/audio_visual_dataset_robo_raw'
+    do_norm: false
+
+img_size: 224
+use_subset: false
+subset_size: 0.35
+use_robot_data: true
+test_split: 0.20
+val_split: 0.20
+exclude_ambient: false  # Set to true to exclude ambient samples
+classes:
+  - 'leaf'
+  - 'twig'
+  - 'trunk'
+  - 'ambient'
+use_ambient: true
+batch_size: 4
+num_workers: 2
+preprocess_images: true
+processed_img_dir: "processed_images"
+
+# Test data random resampling configuration
+test_resampling:
+  enabled: false      # Flag to enable/disable test resampling
+  iterations: 5       # Number of random resampling iterations
+  fraction: 0.8       # Fraction of test data to sample in each iteration
+
+# Augmentations
+augmentations:
+  # Global augmentation settings
+  augmentation_probability: 0.5            # Probability of applying each augmentation
+  
+  # Image augmentations
+  image_rotation: false                    # Enable random image rotations
+  image_rotation_degrees: 30               # Maximum rotation degrees
+  
+  # Audio augmentations - frequency domain
+  audio_frequency_scaling: false           # Enable frequency scaling
+  frequency_scaling_range: [0.8, 1.2]      # Frequency scaling range (min, max)
+  
+  audio_frequency_shift: false             # Enable frequency shifting
+  frequency_shift_range: [-20, 20]         # Frequency bin shift range (min, max)
+  
+  # Audio augmentations - time domain
+  audio_power: false                       # Enable power/volume augmentation
+  power_range: [0.7, 1.3]                  # Power scaling range (min, max)
+  
+  audio_time_stretch: false                # Enable time stretching
+  time_stretch_range: [0.8, 1.2]           # Time stretch factor range (min, max)
+  
+  audio_gaussian_noise: false              # Enable Gaussian noise addition
+  noise_level_range: [0.001, 0.01]         # Noise level range (min, max)
+  
+  audio_clipping: false                    # Enable audio clipping
+  clipping_range: [0.7, 0.95]              # Clipping threshold range (min, max)
+  
+  # New audio augmentations
+  audio_polarity_inversion: false          # Enable polarity inversion
+  
+  audio_harmonic_distortion: false         # Enable harmonic distortion
+  harmonic_distortion_range: [0.1, 0.5]    # Distortion intensity range (min, max)
+  
+  audio_phase_distortion: false            # Enable phase distortion
+  phase_distortion_range: [0.1, 0.3]       # Phase distortion range (min, max)
+  
+  audio_compression: false                 # Enable dynamic range compression
+  compression_threshold_range: [-20, -10]  # Threshold in dB (min, max)
+  compression_ratio_range: [2.0, 5.0]      # Compression ratio (min, max)
+  
+  # Robot humming (motor noise) augmentation
+  audio_robot_humming: false               # Enable robot humming noise injection
+  robot_humming_mix_ratio: [0.1, 0.4]      # Mix ratio range for robot humming (min, max)
+  robot_humming_audio_path: 'robot_humming_samples'  # Directory containing robot humming audio samples
+
+# Test data specific options
+subset_test_data: false  # Set to true to use a subset of test data
+test_subset_size: 0.20  # Fraction of test data to use
+
+# Audio processing settings
+sample_rate: 16000
+n_fft: 1024
+hop_length: 512
+n_mels: 128
+target_length: 1024
+do_norm: true  # Flag to control audio normalization in the dataset
+
+# Image normalization
+img_mean: [0.485, 0.456, 0.406]
+img_std: [0.229, 0.224, 0.225]
+
+# Add the binary classification flag to the data configuration
+use_binary_classification: false  # Set to true to enable binary classification (contact vs no-contact)
+
+# Wandb logging options
+upload_confusion_matrix: true  # Set to true to upload confusion matrix to wandb
+
+# Category balancing configuration
+category_balancing:
+  enabled: true
+  min_samples_per_category: 700
+  balance_test_set: true
+  test_min_samples_per_category: 155  # New setting for test set minimum samples
