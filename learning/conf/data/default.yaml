@@ -92,7 +92,7 @@ augmentations:
   robot_humming_audio_path: 'robot_humming_samples'  # Directory containing robot humming audio samples
 
 # Test data specific options
-subset_test_data: true  # Set to true to use a subset of test data
+subset_test_data: false  # Set to true to use a subset of test data
 test_subset_size: 0.20  # Fraction of test data to use
 
 # Audio processing settings

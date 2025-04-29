@@ -266,10 +266,18 @@ def main(cfg: DictConfig):
         # Use custom balancing configuration if enabled
         test_balance_enabled = cfg.data.get('category_balancing', {}).get('balance_test_set', True)
         if cfg.data.get('category_balancing', {}).get('enabled', False) and test_balance_enabled:
-            min_samples = cfg.data.category_balancing.min_samples_per_category
-            print(f"\n{'='*50}")
-            print(f"USING CUSTOM CATEGORY BALANCING FOR TEST SET: {min_samples} samples per category")
-            print(f"{'='*50}\n")
+            # Check if there's a specific value for test set balancing
+            # Handle the case where test_min_samples_per_category might not exist
+            try:
+                min_samples = cfg.data.category_balancing.test_min_samples_per_category
+                print(f"\n{'='*50}")
+                print(f"USING TEST-SPECIFIC CATEGORY BALANCING: {min_samples} samples per category")
+                print(f"{'='*50}\n")
+            except (AttributeError, KeyError):
+                min_samples = cfg.data.category_balancing.min_samples_per_category
+                print(f"\n{'='*50}")
+                print(f"USING CUSTOM CATEGORY BALANCING FOR TEST SET: {min_samples} samples per category")
+                print(f"{'='*50}\n")
             
             # Find the smallest test category count
             smallest_test_category_count = test_category_counts.min()

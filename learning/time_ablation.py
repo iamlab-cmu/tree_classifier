@@ -11,7 +11,7 @@ from datetime import datetime
 import time
 
 # Hardcoded configuration parameters
-WANDB_PROJECT_NAME = "contact-sound-time-ablation-v5"
+WANDB_PROJECT_NAME = "contact-sound-time-ablation-v7"
 NUM_EPOCHS = "50"  # Training epochs for ablation study
 VAL_SPLIT = "0.2"  # 20% of training data used for validation
 
@@ -185,7 +185,10 @@ def main():
             "data.test_base_path": dataset["robot_dir_no_prefix"],
             "data.use_robot_data": "true",
             "data.use_subset": "false",  # Explicitly set to false to use full dataset
-            "data.category_balancing.enabled": "false",  # Disable category balancing
+            "data.category_balancing.enabled": "true",  # Enable category balancing
+            "data.category_balancing.min_samples_per_category": "700",  # Use 700 samples per category from default.yaml
+            "data.category_balancing.balance_test_set": "true",  # Ensure test set is also balanced
+            "data.category_balancing.test_min_samples_per_category": "155",  # Test set should use 155 samples per category
             "data.val_split": VAL_SPLIT,
             "training.epochs": NUM_EPOCHS,
             "wandb.run_name": run_name,
@@ -218,7 +221,7 @@ def main():
         f.write("## Experiment Settings\n\n")
         f.write(f"- **WandB Project**: {WANDB_PROJECT_NAME}\n")
         f.write(f"- **Epochs**: {NUM_EPOCHS}\n")
-        f.write(f"- **Using Full Dataset**: Yes (no subsetting or balancing)\n")
+        f.write(f"- **Using Full Dataset**: Yes (with training balanced to 700 samples per category, test set to 155)\n")
         f.write(f"- **Validation Split**: {VAL_SPLIT}\n")
         f.write(f"- **Classification**: Multi-class\n\n")
         
