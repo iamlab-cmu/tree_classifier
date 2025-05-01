@@ -62,18 +62,19 @@ def main():
     study_dir = args.output_dir if args.output_dir else f"time_ablation_study_{timestamp}"
     os.makedirs(study_dir, exist_ok=True)
     
-    # Define window durations to test (from 0.1 to 1.0 seconds in 0.1 second intervals)
-    window_configs = []
-    for i in range(1, 11):  # Starting from 1 (0.1s) to 10 (1.0s)
-        min_duration = round(i * 0.1, 1)  # 0.1, 0.2, ..., 1.0
-        stride = round(min_duration / 3, 3)  # 1/3 of the min duration
-        
-        window_configs.append({
-            "name": f"window_{int(min_duration*10)}",
-            "window_length_seconds": min_duration,
-            "window_stride_seconds": stride,
-            "description": f"Window duration: {min_duration}s, stride: {stride}s (1/3 of window)"
-        })
+    # Define only window_3 and window_4 configurations (without strides)
+    window_configs = [
+        {
+            "name": "window_3",
+            "window_length_seconds": 0.3,
+            "description": "Window duration: 0.3s"
+        },
+        {
+            "name": "window_4",
+            "window_length_seconds": 0.4,
+            "description": "Window duration: 0.4s"
+        }
+    ]
     
     # If specific window lengths are specified, filter the configs
     if args.window_lengths:
@@ -90,7 +91,7 @@ def main():
     
     # Print experiment summary
     print(f"Running time window ablation experiments with:")
-    print(f"- Window configurations: {len(window_configs)} (0.1s to 1.0s)")
+    print(f"- Window configurations: {len(window_configs)} (window_3 and window_4)")
     print(f"- Classification: Multi-class")
     print(f"- Base directory prefix: {base_dir}")
     print(f"- Using full dataset (no subsetting)")
@@ -216,7 +217,7 @@ def main():
     # Create a README.md with experiment descriptions
     readme_path = os.path.join(study_dir, "README.md")
     with open(readme_path, "w") as f:
-        f.write("# Window Duration Ablation Study (0.1s to 1.0s)\n\n")
+        f.write("# Window Duration Ablation Study (Window 3 and Window 4)\n\n")
         f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("## Experiment Settings\n\n")
         f.write(f"- **WandB Project**: {WANDB_PROJECT_NAME}\n")
@@ -231,7 +232,6 @@ def main():
             f.write(f"### {config['name']}\n")
             f.write(f"- **Description**: {config['description']}\n")
             f.write(f"- **Window Length**: {config['window_length_seconds']} seconds\n")
-            f.write(f"- **Window Stride**: {config['window_stride_seconds']} seconds\n")
             f.write(f"- **Train Dataset**: `{dataset['probe_dir']}`\n")
             f.write(f"- **Test Dataset**: `{dataset['robot_dir']}`\n\n")
     
@@ -256,7 +256,7 @@ def parse_arguments():
         "--window-lengths",
         type=str,
         default=None,
-        help="Comma-separated list of window lengths to test (e.g., '0.5,0.7,1.0')"
+        help="Comma-separated list of window lengths to test (e.g., '0.3,0.4')"
     )
     parser.add_argument(
         "--datasets-path",
