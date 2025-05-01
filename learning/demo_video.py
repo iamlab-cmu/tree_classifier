@@ -10,6 +10,7 @@ import torchaudio
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from PIL import Image, ImageDraw, ImageFont
+import glob
 
 # Adjust Python path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -340,8 +341,8 @@ class VideoEvaluator:
         # If we used XVID codec with .avi container, convert to mp4
         if 'temp_output_path' in locals() and os.path.exists(temp_output_path):
             print("Converting AVI to MP4 format...")
-            # Include the original normalized audio in the output video
-            ffmpeg_cmd = f"ffmpeg -i {temp_output_path} -i {video_path} -c:v libx264 -pix_fmt yuv420p -c:a aac -af \"volume=2.0,dynaudnorm\" -map 0:v:0 -map 1:a:0 {output_video_path} -y -hide_banner -loglevel error"
+            # Include the original audio in the output video without normalization
+            ffmpeg_cmd = f"ffmpeg -i {temp_output_path} -i {video_path} -c:v libx264 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 {output_video_path} -y -hide_banner -loglevel error"
             os.system(ffmpeg_cmd)
             # Remove temporary AVI file
             os.remove(temp_output_path)
@@ -349,8 +350,8 @@ class VideoEvaluator:
         # If we created frames because VideoWriter failed, convert them to video using ffmpeg
         if 'frames_dir' in locals() and os.path.exists(frames_dir):
             print("Creating video using ffmpeg...")
-            # Include the original normalized audio in the output video
-            ffmpeg_cmd = f"ffmpeg -framerate {video_fps} -i {frames_dir}/%d.jpg -i {video_path} -c:v libx264 -pix_fmt yuv420p -c:a aac -af \"volume=2.0,dynaudnorm\" -map 0:v:0 -map 1:a:0 {output_video_path} -y -hide_banner -loglevel error"
+            # Include the original audio in the output video without normalization
+            ffmpeg_cmd = f"ffmpeg -framerate {video_fps} -i {frames_dir}/%d.jpg -i {video_path} -c:v libx264 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 {output_video_path} -y -hide_banner -loglevel error"
             os.system(ffmpeg_cmd)
             # Clean up frames
             import shutil
@@ -360,11 +361,11 @@ class VideoEvaluator:
         if os.path.exists(audio_path):
             os.remove(audio_path)
         
-        # Ensure the output video has normalized audio (in case it didn't get added above)
+        # Ensure the output video has audio (in case it didn't get added above)
         final_output_path = os.path.splitext(output_video_path)[0] + "_with_audio.mp4"
         if not os.path.exists(final_output_path):
-            print("Adding normalized audio to the final video...")
-            audio_cmd = f"ffmpeg -i {output_video_path} -i {video_path} -c:v copy -c:a aac -af \"volume=2.0,dynaudnorm\" -map 0:v:0 -map 1:a:0 {final_output_path} -y -hide_banner -loglevel error"
+            print("Adding audio to the final video...")
+            audio_cmd = f"ffmpeg -i {output_video_path} -i {video_path} -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 {final_output_path} -y -hide_banner -loglevel error"
             os.system(audio_cmd)
             # Replace the original output_video_path with the one with audio
             if os.path.exists(final_output_path) and os.path.getsize(final_output_path) > 0:
@@ -388,7 +389,7 @@ class VideoEvaluator:
         
         # If the video cannot be played, try to convert it with ffmpeg
         print("If you have trouble playing the video, you can convert it with ffmpeg using:")
-        print(f"ffmpeg -i {output_video_path} -c:v libx264 -pix_fmt yuv420p -c:a aac -af \"volume=2.0,dynaudnorm\" {os.path.splitext(output_video_path)[0]}_converted.mp4")
+        print(f"ffmpeg -i {output_video_path} -c:v libx264 -pix_fmt yuv420p -c:a aac {os.path.splitext(output_video_path)[0]}_converted.mp4")
         
         return results
     
@@ -606,12 +607,25 @@ class VideoEvaluator:
         
         return predicted_category != expected_category
 
+def find_videos_recursive(directory):
+    """Find all .mp4 files recursively in the given directory.
+    
+    Args:
+        directory (str): Directory to search recursively
+        
+    Returns:
+        list: List of paths to MP4 video files
+    """
+    print(f"Searching for MP4 files in {directory} and subdirectories...")
+    videos = glob.glob(os.path.join(directory, '**/*.mp4'), recursive=True)
+    print(f"Found {len(videos)} MP4 files")
+    return videos
 
 def main():
     """Main function to parse arguments and run video evaluation"""
-    parser = argparse.ArgumentParser(description="Evaluate contact interactions in a video")
+    parser = argparse.ArgumentParser(description="Evaluate contact interactions in videos")
     parser.add_argument("--model", required=True, help="Path to the trained model (.pth file)")
-    parser.add_argument("--video", required=True, help="Path to the video file to analyze")
+    parser.add_argument("--video", help="Path to the video file or directory of videos to analyze")
     parser.add_argument("--output", help="Directory to save results (default: video directory)")
     parser.add_argument("--segment-duration", type=float, default=0.8, help="Duration of each segment in seconds")
     parser.add_argument("--img-size", type=int, default=224, help="Image size for the model")
@@ -626,12 +640,12 @@ def main():
         print(f"Error: Model file not found: {args.model}")
         return 1
     
-    # Ensure the video file exists
-    if not os.path.exists(args.video):
-        print(f"Error: Video file not found: {args.video}")
+    # Check if video is a directory or file
+    if args.video is None:
+        print("Error: Please provide a video file or directory using --video")
         return 1
     
-    # Create the video evaluator - always using dual audio with images
+    # Create the video evaluator
     evaluator = VideoEvaluator(
         model_path=args.model,
         img_size=args.img_size,
@@ -641,12 +655,61 @@ def main():
         audio_model=args.audio_model
     )
     
-    # Process the video
-    evaluator.process_video(
-        video_path=args.video,
-        output_dir=args.output,
-        save_segments=args.save_segments
-    )
+    # Process a single video file
+    if os.path.isfile(args.video):
+        if not args.video.lower().endswith('.mp4'):
+            print(f"Error: File is not an MP4 video: {args.video}")
+            return 1
+            
+        evaluator.process_video(
+            video_path=args.video,
+            output_dir=args.output,
+            save_segments=args.save_segments
+        )
+    
+    # Process a directory of video files
+    elif os.path.isdir(args.video):
+        # Find all mp4 files recursively
+        video_files = find_videos_recursive(args.video)
+        
+        if not video_files:
+            print(f"No MP4 files found in {args.video}")
+            return 1
+        
+        # Process each video file
+        success_count = 0
+        fail_count = 0
+        
+        for i, video_path in enumerate(video_files):
+            print(f"\n[{i+1}/{len(video_files)}] Processing: {os.path.basename(video_path)}")
+            
+            try:
+                # Create a subdirectory in the output dir for each video if an output dir is specified
+                video_output_dir = None
+                if args.output:
+                    video_name = os.path.splitext(os.path.basename(video_path))[0]
+                    video_output_dir = os.path.join(args.output, video_name)
+                    os.makedirs(video_output_dir, exist_ok=True)
+                
+                evaluator.process_video(
+                    video_path=video_path,
+                    output_dir=video_output_dir,
+                    save_segments=args.save_segments
+                )
+                success_count += 1
+            except Exception as e:
+                print(f"Error processing video {video_path}: {str(e)}")
+                fail_count += 1
+        
+        # Print summary
+        print("\nProcessing summary:")
+        print(f"Total videos: {len(video_files)}")
+        print(f"Successfully processed: {success_count}")
+        print(f"Failed: {fail_count}")
+        
+    else:
+        print(f"Error: Video path does not exist: {args.video}")
+        return 1
     
     return 0
 
