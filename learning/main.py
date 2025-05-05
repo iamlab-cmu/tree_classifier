@@ -5,8 +5,8 @@ import hydra
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold
+from sklearn.metrics import classification_report, f1_score
 from hydra.utils import to_absolute_path
 
 from models import MultiModalClassifier
@@ -28,7 +28,7 @@ from utils import (
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.1")
 def main(cfg: DictConfig):
-    """Main function to run the training pipeline"""
+    """Main function to run the training pipeline with 5-fold cross-validation"""
     print(f"Running main training script with config: {cfg.model.use_images=}, {cfg.model.use_audio=}")
     
     # Get the original working directory
@@ -163,50 +163,238 @@ def main(cfg: DictConfig):
     print(df['category'].value_counts())
     print("="*50 + "\n")
     
-    # Ensure a minimum number of samples per class in test set
-    val_split = cfg.data.val_split
-    min_test_samples_per_class = 2  # Minimum required for each class in the test set
+    # Get category classes
+    category_classes = get_class_names(cfg)
+    
+    # Prepare for 5-fold cross-validation
+    print("\n" + "="*50)
+    print("STARTING 5-FOLD CROSS-VALIDATION")
+    print("="*50 + "\n")
+    
+    # Initialize arrays to store results
+    all_f1_scores = []
+    all_f1_weighted = []
+    all_f1_macro = []
+    fold_reports = []
+    
+    # Initialize StratifiedKFold
+    n_splits = 5
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=cfg.training.seed)
+    
+    # Get the labels for stratification
+    labels = df['category'].map(lambda x: category_classes.index(x))
+    
+    # For each fold
+    for fold, (train_idx, val_idx) in enumerate(skf.split(df, labels)):
+        print(f"\n{'='*50}")
+        print(f"FOLD {fold+1}/{n_splits}")
+        print(f"{'='*50}\n")
+        
+        # Split the data
+        train_df = df.iloc[train_idx].reset_index(drop=True)
+        val_df = df.iloc[val_idx].reset_index(drop=True)
+        
+        print(f"Training set: {len(train_df)} samples")
+        print(f"Validation set: {len(val_df)} samples")
+        
+        # Create datasets
+        train_dataset = AudioVisualDataset(
+            train_df, 
+            base_path=to_absolute_path(cfg.data.train_base_path),
+            img_size=cfg.data.img_size,
+            use_binary_classification=cfg.data.get('use_binary_classification', False),
+            augment=True,  # Enable augmentations for training data
+            aug_config=cfg.data.get('augmentations', {}),
+            do_norm=cfg.data.do_norm
+        )
+        
+        val_dataset = AudioVisualDataset(
+            val_df, 
+            base_path=to_absolute_path(cfg.data.train_base_path),
+            img_size=cfg.data.img_size,
+            use_binary_classification=cfg.data.get('use_binary_classification', False),
+            augment=False,  # No augmentations for validation data
+            aug_config=cfg.data.get('augmentations', {}),
+            do_norm=cfg.data.do_norm
+        )
+        
+        # Create data loaders
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=cfg.training.batch_size,
+            shuffle=True, 
+            num_workers=cfg.training.num_workers,
+            collate_fn=custom_collate
+        )
+        
+        val_loader = DataLoader(
+            val_dataset, 
+            batch_size=cfg.training.batch_size,
+            shuffle=False, 
+            num_workers=cfg.training.num_workers,
+            collate_fn=custom_collate
+        )
+        
+        # Initialize a fresh model for this fold
+        # Note: Using 'pretrained' parameter which is deprecated but still functional
+        # The deprecation warning is expected and can be ignored
+        model = MultiModalClassifier(
+            num_classes=cfg.model.num_classes,
+            use_images=cfg.model.use_images,
+            use_audio=cfg.model.use_audio,
+            pretrained=not cfg.model.from_scratch,
+            audio_model=cfg.model.audio_model,
+            use_dual_audio=cfg.model.use_dual_audio,
+            fusion_type=cfg.model.fusion_type
+        )
 
-    # Get number of classes
-    num_classes = len(df['category'].unique())
+        # Save initial model architecture for consistent loading during testing
+        if fold == 0:
+            # Save model architecture (without weights) for reference
+            initial_model_path = os.path.join(cfg.logging.output_dir, 'model_architecture.pt')
+            # Save a copy of the model architecture definition
+            torch.save({
+                'num_classes': cfg.model.num_classes,
+                'use_images': cfg.model.use_images,
+                'use_audio': cfg.model.use_audio,
+                'pretrained': not cfg.model.from_scratch,
+                'audio_model': cfg.model.audio_model,
+                'use_dual_audio': cfg.model.use_dual_audio,
+                'fusion_type': cfg.model.fusion_type
+            }, initial_model_path)
+            print(f"Saved model architecture configuration to {initial_model_path}")
 
-    # Calculate minimum test size required for stratification
-    min_test_size = min_test_samples_per_class * num_classes / len(df)
-
-    # Use the larger of the configured val_split or the minimum required test size
-    effective_test_size = max(val_split, min_test_size)
-
-    # Print info for debugging
-    print(f"Number of classes: {num_classes}")
-    print(f"Total samples: {len(df)}")
-    print(f"Configured validation split: {val_split:.2f} ({int(val_split * len(df))} samples)")
-    print(f"Minimum required validation split: {min_test_size:.2f} ({min_test_samples_per_class * num_classes} samples)")
-    print(f"Using effective validation split: {effective_test_size:.2f} ({int(effective_test_size * len(df))} samples)")
-
-    # Perform the train-test split with the effective test size
-    train_df, val_df = train_test_split(
-        df,
-        test_size=effective_test_size,
-        stratify=df['category'],
-        random_state=cfg.training.seed
-    )
-
-    print(f"Training set: {len(train_df)} samples")
-    print(f"Validation set: {len(val_df)} samples")
-
-    # Check if test CSV exists at direct path or joined with base path
+        # Train model on this fold
+        history, val_preds, val_labels = train_model(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            cfg=cfg,
+            device=device
+        )
+        
+        # Save model for this fold
+        fold_model_path = os.path.join(cfg.logging.output_dir, f'fold_{fold+1}_model.pth')
+        torch.save(model.state_dict(), fold_model_path)
+        print(f"Saved fold {fold+1} model weights to {fold_model_path}")
+        
+        # Evaluate the model on validation data
+        print(f"\nEvaluating fold {fold+1} model on validation data...")
+        val_preds_eval, val_labels_eval, val_accuracy = evaluate_model(
+            model=model,
+            data_loader=val_loader,
+            device=device
+        )
+        print(f"Fold {fold+1} Validation Accuracy: {val_accuracy:.4f}")
+        
+        # Plot confusion matrix for this fold
+        plot_confusion_matrix(val_labels, val_preds, category_classes, cfg, suffix=f"_fold_{fold+1}")
+        
+        # Generate classification report
+        report = classification_report(val_labels, val_preds, target_names=category_classes,
+                                     output_dict=True, zero_division=0)
+        fold_reports.append(report)
+        
+        print(f"\nFold {fold+1} Classification Report:")
+        print(classification_report(val_labels, val_preds, target_names=category_classes,
+                                   zero_division=0))
+        
+        # Calculate per-class F1 scores
+        fold_f1_scores = []
+        for class_idx, class_name in enumerate(category_classes):
+            # Calculate class-specific F1 score
+            class_f1 = report[class_name]['f1-score']
+            fold_f1_scores.append(class_f1)
+            print(f"F1 score for class '{class_name}': {class_f1:.4f}")
+        
+        # Calculate macro and weighted F1 scores
+        f1_macro = report['macro avg']['f1-score']
+        f1_weighted = report['weighted avg']['f1-score']
+        all_f1_macro.append(f1_macro)
+        all_f1_weighted.append(f1_weighted)
+        all_f1_scores.append(fold_f1_scores)
+        
+        print(f"Macro-averaged F1: {f1_macro:.4f}")
+        print(f"Weighted-averaged F1: {f1_weighted:.4f}")
+        
+        # Log to wandb if enabled
+        if cfg.wandb.enabled:
+            import wandb
+            wandb.log({
+                f"fold_{fold+1}/f1_macro": f1_macro,
+                f"fold_{fold+1}/f1_weighted": f1_weighted,
+                f"fold_{fold+1}/val_accuracy": val_accuracy
+            })
+            
+            # Log per-class metrics
+            for i, class_name in enumerate(category_classes):
+                wandb.log({
+                    f"fold_{fold+1}/f1_{class_name}": fold_f1_scores[i]
+                })
+    
+    # Calculate cross-validation summary statistics
+    all_f1_scores = np.array(all_f1_scores)
+    mean_f1_scores = np.mean(all_f1_scores, axis=0)
+    std_f1_scores = np.std(all_f1_scores, axis=0)
+    var_f1_scores = np.var(all_f1_scores, axis=0)
+    
+    mean_f1_macro = np.mean(all_f1_macro)
+    std_f1_macro = np.std(all_f1_macro)
+    var_f1_macro = np.var(all_f1_macro)
+    
+    mean_f1_weighted = np.mean(all_f1_weighted)
+    std_f1_weighted = np.std(all_f1_weighted)
+    var_f1_weighted = np.var(all_f1_weighted)
+    
+    # Print cross-validation summary
+    print("\n" + "="*50)
+    print("CROSS-VALIDATION SUMMARY")
+    print("="*50 + "\n")
+    
+    print(f"Mean Macro-averaged F1 Score: {mean_f1_macro:.4f}")
+    print(f"Standard Deviation of Macro-averaged F1 Scores: {std_f1_macro:.4f}")
+    print(f"Variance of Macro-averaged F1 Scores: {var_f1_macro:.4f}")
+    print()
+    
+    print(f"Mean Weighted-averaged F1 Score: {mean_f1_weighted:.4f}")
+    print(f"Standard Deviation of Weighted-averaged F1 Scores: {std_f1_weighted:.4f}")
+    print(f"Variance of Weighted-averaged F1 Scores: {var_f1_weighted:.4f}")
+    print()
+    
+    print("Per-class F1 Score Summary:")
+    for i, class_name in enumerate(category_classes):
+        print(f"  {class_name}:")
+        print(f"    Mean F1 Score: {mean_f1_scores[i]:.4f}")
+        print(f"    Standard Deviation: {std_f1_scores[i]:.4f}")
+        print(f"    Variance: {var_f1_scores[i]:.4f}")
+    
+    # Log cross-validation summary to wandb
+    if cfg.wandb.enabled:
+        import wandb
+        wandb.log({
+            "cv_summary/f1_macro_mean": mean_f1_macro,
+            "cv_summary/f1_macro_std": std_f1_macro,
+            "cv_summary/f1_macro_var": var_f1_macro,
+            "cv_summary/f1_weighted_mean": mean_f1_weighted,
+            "cv_summary/f1_weighted_std": std_f1_weighted,
+            "cv_summary/f1_weighted_var": var_f1_weighted
+        })
+        
+        # Log per-class summary metrics
+        for i, class_name in enumerate(category_classes):
+            wandb.log({
+                f"cv_summary/f1_{class_name}_mean": mean_f1_scores[i],
+                f"cv_summary/f1_{class_name}_std": std_f1_scores[i],
+                f"cv_summary/f1_{class_name}_var": var_f1_scores[i]
+            })
+    
+    # Evaluate on test set (robot data) if available
     test_csv_direct = to_absolute_path(cfg.data.test_csv_path)
     test_csv_joined = os.path.join(to_absolute_path(cfg.data.test_base_path), cfg.data.test_csv_path)
-
-    print(f"Checking for test CSV at: {test_csv_direct}")
-    print(f"Alternative path: {test_csv_joined}")
-    print(f"Direct path exists: {os.path.exists(test_csv_direct)}")
-    print(f"Joined path exists: {os.path.exists(test_csv_joined)}")
-
+    
     if cfg.data.use_robot_data and (os.path.exists(test_csv_direct) or os.path.exists(test_csv_joined)):
         print("\n" + "="*50)
-        print("USING ROBOT DATA AS TEST SET")
-        print(f"Test dataset: {cfg.data.test_csv_path}")
+        print("EVALUATING ON TEST SET (ROBOT DATA)")
         print("="*50 + "\n")
         
         # Load test dataset using the path that exists
@@ -214,29 +402,7 @@ def main(cfg: DictConfig):
         test_df = pd.read_csv(test_csv_path)
         print(f"\nLoaded test dataset with {len(test_df)} samples")
         
-        # Print the first few rows to debug path issues
-        print("\nFirst few rows of test dataset:")
-        print(test_df.head())
-        
-        # Verify the file paths in the test dataset
-        test_base_path = to_absolute_path(cfg.data.test_base_path)
-        print(f"\nTest base path: {test_base_path}")
-        
-        # Check if the image and audio directories exist
-        img_dir = os.path.join(test_base_path, 'images')
-        audio_dir = os.path.join(test_base_path, 'audio')
-        
-        print(f"Image directory exists: {os.path.exists(img_dir)}")
-        print(f"Audio directory exists: {os.path.exists(audio_dir)}")
-        
-        # List the directories in the test base path
-        print(f"\nDirectories in test base path:")
-        try:
-            dirs = [d for d in os.listdir(test_base_path) if os.path.isdir(os.path.join(test_base_path, d))]
-            print(dirs)
-        except Exception as e:
-            print(f"Error listing directories: {e}")
-        
+        # Process test dataset as in the original code...
         # Filter out ambient samples if specified
         if cfg.data.get('exclude_ambient', False):
             ambient_count = len(test_df[test_df['category'] == 'ambient'])
@@ -345,216 +511,148 @@ def main(cfg: DictConfig):
         )
         
         print(f"Test samples: {len(test_dataset)}")
-    else:
-        print("No test set (robot data) available")
-    
-    # Create datasets with absolute paths for base_path
-    train_dataset = AudioVisualDataset(
-        train_df, 
-        base_path=to_absolute_path(cfg.data.train_base_path),
-        img_size=cfg.data.img_size,
-        use_binary_classification=cfg.data.get('use_binary_classification', False),
-        augment=True,  # Enable augmentations for training data
-        aug_config=cfg.data.get('augmentations', {}),
-        do_norm=cfg.data.do_norm
-    )
-    
-    # For validation dataset, specify the correct base path if using a separate dataset
-    val_dataset = AudioVisualDataset(
-        val_df, 
-        base_path=to_absolute_path(cfg.data.train_base_path),
-        img_size=cfg.data.img_size,
-        use_binary_classification=cfg.data.get('use_binary_classification', False),
-        augment=False,  # No augmentations for validation data
-        aug_config=cfg.data.get('augmentations', {}),
-        do_norm=cfg.data.do_norm
-    )
-    
-    print(f"\nTraining samples: {len(train_dataset)}")
-    print(f"Validation samples: {len(val_dataset)}")
-    
-    # Create data loaders with the custom collate function
-    train_loader = DataLoader(
-        train_dataset, 
-        batch_size=cfg.training.batch_size,
-        shuffle=True, 
-        num_workers=cfg.training.num_workers,
-        collate_fn=custom_collate
-    )
-    
-    val_loader = DataLoader(
-        val_dataset, 
-        batch_size=cfg.training.batch_size,
-        shuffle=False, 
-        num_workers=cfg.training.num_workers,
-        collate_fn=custom_collate
-    )
-    
-    # Initialize model with modality flags, pretrained option, and audio model type
-    model = MultiModalClassifier(
-        num_classes=cfg.model.num_classes,
-        use_images=cfg.model.use_images,
-        use_audio=cfg.model.use_audio,
-        pretrained=not cfg.model.from_scratch,
-        audio_model=cfg.model.audio_model,
-        use_dual_audio=cfg.model.use_dual_audio,
-        fusion_type=cfg.model.fusion_type
-    )
-    
-    # Train model
-    history, val_preds, val_labels = train_model(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        cfg=cfg,
-        device=device
-    )
-    
-    # Get class names
-    category_classes = get_class_names(cfg)
-    
-    # Plot confusion matrix
-    plot_confusion_matrix(val_labels, val_preds, category_classes, cfg)
-    
-    # Generate classification report
-    report = classification_report(val_labels, val_preds, target_names=category_classes, 
-                                  output_dict=True, zero_division=0)
-    print("\nClassification Report:")
-    print(classification_report(val_labels, val_preds, target_names=category_classes, 
-                               zero_division=0))
-    
-    # Log classification metrics to wandb
-    log_classification_metrics(report, category_classes)
-    
-    # Add binary classification metrics (contact vs. no-contact) regardless of training mode
-    if not cfg.data.get('use_binary_classification', False):
-        print("\nAdding binary classification metrics (contact vs. no-contact)...")
         
-        # Convert multi-class labels to binary (contact vs. no-contact)
-        binary_val_labels, binary_val_preds = convert_to_binary_classification(val_labels, val_preds)
+        # Test the model from each fold on the test dataset and report average results
+        test_fold_f1_macro = []
+        test_fold_f1_weighted = []
+        test_fold_class_f1 = [[] for _ in range(len(category_classes))]
         
-        # Plot binary confusion matrix
-        binary_classes = ['contact', 'no-contact']
-        plot_confusion_matrix(binary_val_labels, binary_val_preds, binary_classes, cfg, suffix="_binary")
-        
-        # Generate binary classification report
-        binary_report = classification_report(binary_val_labels, binary_val_preds, 
-                                             target_names=binary_classes, output_dict=True)
-        print("\nBinary Classification Report (Contact vs. No-Contact):")
-        print(classification_report(binary_val_labels, binary_val_preds, target_names=binary_classes))
-        
-        # Log binary metrics to wandb
-        log_classification_metrics(binary_report, binary_classes, binary_mode=True)
-    
-    # Save misclassified samples
-    # print("\nSaving misclassified samples for analysis...")
-    # save_misclassified_samples(
-    #     val_loader=val_loader,
-    #     model=model,
-    #     val_preds=val_preds,
-    #     val_labels=val_labels,
-    #     cfg=cfg,
-    #     device=device
-    # )
-    
-    # Evaluate on test set (robot data) if available
-    if test_loader is not None:
-        print("\n" + "="*50)
-        print("EVALUATING ON TEST SET (ROBOT DATA)")
-        print("="*50 + "\n")
-        
-        # Load the best model for evaluation
-        best_model_path = os.path.join(cfg.logging.output_dir, 'best_contact_sound_model.pth')
-        if os.path.exists(best_model_path):
-            print(f"Loading best model from {best_model_path}")
-            model.load_state_dict(torch.load(best_model_path))
-        else:
-            print("Warning: Best model checkpoint not found. Using current model state.")
-        
-        # Evaluate on test set
-        test_preds, test_labels, test_accuracy = evaluate_model(
-            model=model,
-            data_loader=test_loader,
-            device=device
-        )
-        
-        print(f"\nTest Set Accuracy: {test_accuracy:.4f}")
-        
-        # Generate test set classification report
-        test_report = classification_report(test_labels, test_preds, target_names=category_classes, output_dict=True)
-        print("\nTest Set Classification Report:")
-        print(classification_report(test_labels, test_preds, target_names=category_classes))
-        
-        # Calculate and log variance metrics for robot evaluation
-        class_accuracies = {}
-        for cls_idx, cls_name in enumerate(category_classes):
-            # Get indices for this class
-            cls_indices = [i for i, label in enumerate(test_labels) if label == cls_idx]
-            if cls_indices:
-                # Calculate accuracy for this class
-                cls_correct = sum(1 for i in cls_indices if test_preds[i] == test_labels[i])
-                cls_accuracy = cls_correct / len(cls_indices)
-                class_accuracies[cls_name] = cls_accuracy
-        
-        # Calculate variance and log metrics
-        if len(class_accuracies) > 1:
-            accuracy_values = list(class_accuracies.values())
-            accuracy_variance = np.var(accuracy_values)
-            accuracy_std_dev = np.std(accuracy_values)
+        for fold in range(n_splits):
+            print(f"\nEvaluating fold {fold+1} model on test set...")
+            # Load the model for this fold
+            fold_model_path = os.path.join(cfg.logging.output_dir, f'fold_{fold+1}_model.pth')
+            initial_model_path = os.path.join(cfg.logging.output_dir, 'model_architecture.pt')
             
-            print(f"\nRobot Evaluation Metrics:")
-            print(f"Class accuracies: {class_accuracies}")
-            print(f"Accuracy variance: {accuracy_variance:.4f}")
-            print(f"Accuracy standard deviation: {accuracy_std_dev:.4f}")
+            if os.path.exists(fold_model_path) and os.path.exists(initial_model_path):
+                try:
+                    # Load the model architecture configuration
+                    print(f"Loading model architecture configuration from {initial_model_path}")
+                    model_config = torch.load(initial_model_path)
+                    
+                    # Reconstruct a model with the same architecture
+                    # Note: Using 'pretrained' parameter which is deprecated but still functional
+                    # The deprecation warning is expected and can be ignored
+                    model = MultiModalClassifier(
+                        num_classes=model_config['num_classes'],
+                        use_images=model_config['use_images'],
+                        use_audio=model_config['use_audio'],
+                        pretrained=model_config['pretrained'],
+                        audio_model=model_config['audio_model'],
+                        use_dual_audio=model_config['use_dual_audio'],
+                        fusion_type=model_config['fusion_type']
+                    )
+                    model.to(device)
+                    
+                    # Now load the trained weights
+                    print(f"Loading trained weights from {fold_model_path}")
+                    model.load_state_dict(torch.load(fold_model_path))
+                    print(f"Successfully loaded fold {fold+1} model")
+                    
+                    # Evaluate on test set
+                    test_preds, test_labels, test_accuracy = evaluate_model(
+                        model=model,
+                        data_loader=test_loader,
+                        device=device
+                    )
+                    
+                    print(f"Fold {fold+1} Test Accuracy: {test_accuracy:.4f}")
+                    
+                    # Generate test classification report
+                    test_report = classification_report(test_labels, test_preds, 
+                                                      target_names=category_classes, 
+                                                      output_dict=True)
+                    
+                    # Store F1 scores
+                    test_fold_f1_macro.append(test_report['macro avg']['f1-score'])
+                    test_fold_f1_weighted.append(test_report['weighted avg']['f1-score'])
+                    
+                    # Store per-class F1 scores
+                    for i, class_name in enumerate(category_classes):
+                        if class_name in test_report:
+                            test_fold_class_f1[i].append(test_report[class_name]['f1-score'])
+                    
+                    # Log to wandb if enabled
+                    if cfg.wandb.enabled:
+                        import wandb
+                        wandb.log({
+                            f"test_fold_{fold+1}/accuracy": test_accuracy,
+                            f"test_fold_{fold+1}/f1_macro": test_report['macro avg']['f1-score'],
+                            f"test_fold_{fold+1}/f1_weighted": test_report['weighted avg']['f1-score']
+                        })
+                        
+                        # Log per-class metrics
+                        for i, class_name in enumerate(category_classes):
+                            if class_name in test_report:
+                                wandb.log({
+                                    f"test_fold_{fold+1}/f1_{class_name}": test_report[class_name]['f1-score']
+                                })
+                except Exception as e:
+                    print(f"Error loading or evaluating fold {fold+1} model: {str(e)}")
+            else:
+                if not os.path.exists(initial_model_path):
+                    print(f"Warning: Initial model architecture not found at {initial_model_path}")
+                if not os.path.exists(fold_model_path):
+                    print(f"Warning: Model weights not found for fold {fold+1} at {fold_model_path}")
+        
+        # Calculate and report test set summary statistics
+        if test_fold_f1_macro:
+            print("\n" + "="*50)
+            print("TEST SET EVALUATION SUMMARY ACROSS ALL FOLDS")
+            print("="*50 + "\n")
             
-            # Log to wandb if enabled
+            test_mean_f1_macro = np.mean(test_fold_f1_macro)
+            test_std_f1_macro = np.std(test_fold_f1_macro)
+            test_var_f1_macro = np.var(test_fold_f1_macro)
+            
+            test_mean_f1_weighted = np.mean(test_fold_f1_weighted)
+            test_std_f1_weighted = np.std(test_fold_f1_weighted)
+            test_var_f1_weighted = np.var(test_fold_f1_weighted)
+            
+            print(f"Test Mean Macro-averaged F1 Score: {test_mean_f1_macro:.4f}")
+            print(f"Test Standard Deviation of Macro-averaged F1 Scores: {test_std_f1_macro:.4f}")
+            print(f"Test Variance of Macro-averaged F1 Scores: {test_var_f1_macro:.4f}")
+            print()
+            
+            print(f"Test Mean Weighted-averaged F1 Score: {test_mean_f1_weighted:.4f}")
+            print(f"Test Standard Deviation of Weighted-averaged F1 Scores: {test_std_f1_weighted:.4f}")
+            print(f"Test Variance of Weighted-averaged F1 Scores: {test_var_f1_weighted:.4f}")
+            print()
+            
+            print("Test Per-class F1 Score Summary:")
+            for i, class_name in enumerate(category_classes):
+                if test_fold_class_f1[i]:
+                    class_mean = np.mean(test_fold_class_f1[i])
+                    class_std = np.std(test_fold_class_f1[i])
+                    class_var = np.var(test_fold_class_f1[i])
+                    
+                    print(f"  {class_name}:")
+                    print(f"    Mean F1 Score: {class_mean:.4f}")
+                    print(f"    Standard Deviation: {class_std:.4f}")
+                    print(f"    Variance: {class_var:.4f}")
+            
+            # Log test summary to wandb
             if cfg.wandb.enabled:
                 import wandb
                 wandb.log({
-                    "robot_eval/accuracy_variance": accuracy_variance,
-                    "robot_eval/accuracy_std_dev": accuracy_std_dev
+                    "test_summary/f1_macro_mean": test_mean_f1_macro,
+                    "test_summary/f1_macro_std": test_std_f1_macro,
+                    "test_summary/f1_macro_var": test_var_f1_macro,
+                    "test_summary/f1_weighted_mean": test_mean_f1_weighted,
+                    "test_summary/f1_weighted_std": test_std_f1_weighted,
+                    "test_summary/f1_weighted_var": test_var_f1_weighted
                 })
-                # Log individual class accuracies
-                for cls_name, cls_acc in class_accuracies.items():
-                    wandb.log({f"robot_eval/class_accuracy_{cls_name}": cls_acc})
-        
-        # Plot test set confusion matrix
-        plot_confusion_matrix(test_labels, test_preds, category_classes, cfg, suffix="_test")
-        
-        # Log test metrics to wandb
-        log_classification_metrics(test_report, category_classes, prefix="test_")
-        
-        # If not using binary classification, add binary metrics for test set too
-        if not cfg.data.get('use_binary_classification', False):
-            print("\nAdding binary classification metrics for test set (contact vs. no-contact)...")
-            
-            # Convert multi-class labels to binary (contact vs. no-contact)
-            binary_test_labels, binary_test_preds = convert_to_binary_classification(test_labels, test_preds)
-            
-            # Plot binary confusion matrix for test set
-            binary_classes = ['contact', 'no-contact']
-            plot_confusion_matrix(binary_test_labels, binary_test_preds, binary_classes, cfg, suffix="_test_binary")
-            
-            # Generate binary classification report for test set
-            binary_test_report = classification_report(binary_test_labels, binary_test_preds, 
-                                                 target_names=binary_classes, output_dict=True)
-            print("\nBinary Test Set Classification Report (Contact vs. No-Contact):")
-            print(classification_report(binary_test_labels, binary_test_preds, target_names=binary_classes))
-            
-            # Log binary test metrics to wandb
-            log_classification_metrics(binary_test_report, binary_classes, binary_mode=True, prefix="test_")
-        
-        # Save misclassified samples from test set
-        # print("\nSaving misclassified samples from test set for analysis...")
-        # save_misclassified_samples(
-        #     val_loader=test_loader,  # Using test_loader instead of val_loader
-        #     model=model,
-        #     val_preds=test_preds,
-        #     val_labels=test_labels,
-        #     cfg=cfg,
-        #     device=device
-        # )
-
+                
+                # Log per-class test summary metrics
+                for i, class_name in enumerate(category_classes):
+                    if test_fold_class_f1[i]:
+                        wandb.log({
+                            f"test_summary/f1_{class_name}_mean": np.mean(test_fold_class_f1[i]),
+                            f"test_summary/f1_{class_name}_std": np.std(test_fold_class_f1[i]),
+                            f"test_summary/f1_{class_name}_var": np.var(test_fold_class_f1[i])
+                        })
+    else:
+        print("No test set (robot data) available")
+    
     # Finish wandb run after all logging is complete
     if cfg.wandb.enabled:
         import wandb

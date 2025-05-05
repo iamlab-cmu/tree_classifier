@@ -11,7 +11,7 @@ from datetime import datetime
 import time
 
 # Hardcoded configuration parameters
-WANDB_PROJECT_NAME = "contact-sound-time-ablation-v7"
+WANDB_PROJECT_NAME = "contact-sound-time-ablation-k5-folds"
 NUM_EPOCHS = "50"  # Training epochs for ablation study
 VAL_SPLIT = "0.2"  # 20% of training data used for validation
 
@@ -62,19 +62,14 @@ def main():
     study_dir = args.output_dir if args.output_dir else f"time_ablation_study_{timestamp}"
     os.makedirs(study_dir, exist_ok=True)
     
-    # Define only window_3 and window_4 configurations (without strides)
-    window_configs = [
-        {
-            "name": "window_3",
-            "window_length_seconds": 0.3,
-            "description": "Window duration: 0.3s"
-        },
-        {
-            "name": "window_4",
-            "window_length_seconds": 0.4,
-            "description": "Window duration: 0.4s"
-        }
-    ]
+    # Define window configurations for 5 through 10
+    window_configs = []
+    for i in range(5, 11):
+        window_configs.append({
+            "name": f"window_{i}",
+            "window_length_seconds": i * 0.1,  # 0.5s, 0.6s, ..., 1.0s
+            "description": f"Window duration: {i * 0.1}s"
+        })
     
     # If specific window lengths are specified, filter the configs
     if args.window_lengths:
@@ -91,7 +86,7 @@ def main():
     
     # Print experiment summary
     print(f"Running time window ablation experiments with:")
-    print(f"- Window configurations: {len(window_configs)} (window_3 and window_4)")
+    print(f"- Window configurations: {len(window_configs)} (window_5 through window_10)")
     print(f"- Classification: Multi-class")
     print(f"- Base directory prefix: {base_dir}")
     print(f"- Using full dataset (no subsetting)")
@@ -115,8 +110,8 @@ def main():
         probe_csv_nested = os.path.join(probe_nested_dir, "dataset.csv")
         robot_csv_nested = os.path.join(robot_nested_dir, "dataset.csv")
         
-        probe_csv_path = "learning/audio_visual_dataset_window_1"
-        robot_csv_path = "learning/audio_visual_dataset_robo_window_1"
+        probe_csv_path = probe_dir
+        robot_csv_path = robot_dir
         
         probe_csv = os.path.join(probe_csv_path, "dataset.csv")
         robot_csv = os.path.join(robot_csv_path, "dataset.csv")
@@ -161,8 +156,8 @@ def main():
             print(f"  Robot dataset: {robot_dir}")
         else:
             print(f"No dataset found for {config_name} - {config['description']}")
-            print(f"  Looked for: {probe_csv_direct} or {probe_csv_nested}")
-            print(f"  And: {robot_csv_direct} or {robot_csv_nested}")
+            print(f"  Looked for: {probe_csv}")
+            print(f"  And: {robot_csv}")
     
     if not found_datasets:
         print("No datasets found matching the specified window configurations.")
@@ -217,14 +212,15 @@ def main():
     # Create a README.md with experiment descriptions
     readme_path = os.path.join(study_dir, "README.md")
     with open(readme_path, "w") as f:
-        f.write("# Window Duration Ablation Study (Window 3 and Window 4)\n\n")
+        f.write("# Window Duration Ablation Study (Window 5 through Window 10)\n\n")
         f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("## Experiment Settings\n\n")
         f.write(f"- **WandB Project**: {WANDB_PROJECT_NAME}\n")
         f.write(f"- **Epochs**: {NUM_EPOCHS}\n")
         f.write(f"- **Using Full Dataset**: Yes (with training balanced to 700 samples per category, test set to 155)\n")
         f.write(f"- **Validation Split**: {VAL_SPLIT}\n")
-        f.write(f"- **Classification**: Multi-class\n\n")
+        f.write(f"- **Classification**: Multi-class\n")
+        f.write(f"- **Cross-validation**: 5-fold\n\n")
         
         f.write("## Window Configurations\n\n")
         for dataset in found_datasets:

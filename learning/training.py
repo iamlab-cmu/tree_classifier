@@ -10,9 +10,9 @@ def train_model(model, train_loader, val_loader, cfg, device='cuda'):
     Train the model using the provided data loaders and configuration
     
     Args:
-        model: The model to train
-        train_loader: DataLoader for training data
-        val_loader: DataLoader for validation data
+        model: The model to train (should be freshly initialized for each fold)
+        train_loader: DataLoader for training data specific to the current fold
+        val_loader: DataLoader for validation data specific to the current fold
         cfg: Configuration object containing training parameters
         device: Device to use for training
         
@@ -21,6 +21,7 @@ def train_model(model, train_loader, val_loader, cfg, device='cuda'):
         val_preds: Validation predictions
         val_labels: True validation labels
     """
+    print("Training a fresh model...")
     model.to(device)
     criterion = nn.CrossEntropyLoss()
     
@@ -76,7 +77,7 @@ def train_model(model, train_loader, val_loader, cfg, device='cuda'):
             
             # Statistics
             batch_size = labels.size(0)
-            train_loss += loss.item() * batch_size  # Use labels batch size instead of images
+            train_loss += loss.item() * batch_size
             _, predicted = torch.max(outputs, 1)
             train_total += batch_size
             train_correct += (predicted == labels).sum().item()
@@ -108,7 +109,7 @@ def train_model(model, train_loader, val_loader, cfg, device='cuda'):
                 
                 # Statistics
                 batch_size = labels.size(0)
-                val_loss += loss.item() * batch_size  # Use labels batch size instead of images
+                val_loss += loss.item() * batch_size
                 _, predicted = torch.max(outputs, 1)
                 val_total += batch_size
                 val_correct += (predicted == labels).sum().item()
@@ -171,6 +172,8 @@ def train_model(model, train_loader, val_loader, cfg, device='cuda'):
             if patience_counter >= cfg.training.early_stopping_patience:
                 print(f"Early stopping triggered after epoch {epoch+1}. Best epoch was {best_epoch+1} with validation accuracy {best_val_acc:.4f}")
                 break
+    
+    print(f"Training complete. Best validation accuracy: {best_val_acc:.4f} at epoch {best_epoch+1}")
     
     # Return both history and final validation predictions/labels for confusion matrix
     return history, final_val_preds, final_val_labels
