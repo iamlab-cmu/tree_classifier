@@ -1,8 +1,8 @@
 # Data configuration
-train_csv_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_window_5/dataset.csv'  # Relative to train_base_path
-test_csv_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_robo_window_5/dataset.csv'   # Relative to test_base_path
-train_base_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_window_5'
-test_base_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_robo_window_5'
+train_csv_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_default/dataset.csv'  # Relative to train_base_path
+test_csv_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_robo_default/dataset.csv'   # Relative to test_base_path
+train_base_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_default'
+test_base_path: '/home/dorry/Desktop/research/learning/audio_visual_dataset_robo_default'
 
 # Dataset variations paths (will be overridden by command line arguments)
 dataset_variations:
@@ -43,6 +43,12 @@ batch_size: 4
 num_workers: 2
 preprocess_images: true
 processed_img_dir: "processed_images"
+
+# Test data random resampling configuration
+test_resampling:
+  enabled: false      # Flag to enable/disable test resampling
+  iterations: 5       # Number of random resampling iterations
+  fraction: 0.8       # Fraction of test data to sample in each iteration
 
 # Augmentations
 augmentations:

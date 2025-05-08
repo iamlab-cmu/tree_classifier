@@ -11,7 +11,7 @@ from datetime import datetime
 import time
 
 # Hardcoded configuration parameters
-WANDB_PROJECT_NAME = "contact-sound-time-ablation-k5-folds"
+WANDB_PROJECT_NAME = "contact-sound-time-ablation-test-set-resampling"
 NUM_EPOCHS = "50"  # Training epochs for ablation study
 VAL_SPLIT = "0.2"  # 20% of training data used for validation
 
@@ -64,7 +64,7 @@ def main():
     
     # Define window configurations for 5 through 10
     window_configs = []
-    for i in range(5, 11):
+    for i in range(1, 11):
         window_configs.append({
             "name": f"window_{i}",
             "window_length_seconds": i * 0.1,  # 0.5s, 0.6s, ..., 1.0s
